@@ -41,6 +41,12 @@ uint32_t EventPool::getHashCode(DeviceDescriptor device, EventType type)
     return jenkins_hash(device.id.c_str(), (char)type);
 }
 
+uint32_t EventPool::getHashCode(
+    AudioSessionDescriptor session, EventType type)
+{
+    return jenkins_hash(session.id.c_str(), (char)type);
+}
+
 EventPool::EventPool() : counter(0)
 {
 }
@@ -54,6 +60,23 @@ int EventPool::RegisterEvent(
     DeviceDescriptor device, EventType type, TSFN func)
 {
     uint32_t key = getHashCode(device, type);
+    if (m_events.count(key) <= 0)
+    {
+        std::map<int, TSFN> res;
+        res[counter] = func;
+        m_events[key] = res;
+    }
+    else
+    {
+        m_events[key][counter] = func;
+    }
+    return counter++;
+}
+
+int EventPool::RegisterEvent(
+    AudioSessionDescriptor session, EventType type, TSFN func)
+{
+    uint32_t key = getHashCode(session, type);
     if (m_events.count(key) <= 0)
     {
         std::map<int, TSFN> res;
@@ -84,6 +107,24 @@ bool EventPool::RemoveEvent(DeviceDescriptor device, EventType type, int id)
     }
 }
 
+bool EventPool::RemoveEvent(AudioSessionDescriptor session,
+    EventType type, int id)
+{
+    uint32_t key = getHashCode(session, type);
+    if (m_events.count(key) <= 0)
+        return false;
+
+    if (m_events[key].count(id) > 0)
+    {
+        m_events[key][id].Release();
+        return m_events[key].erase(id) > 0;
+    }
+    else
+    {
+        return false;
+    }
+}
+
 std::vector<TSFN> EventPool::GetListeners(
     DeviceDescriptor device, EventType type)
 {
@@ -93,6 +134,22 @@ std::vector<TSFN> EventPool::GetListeners(
         return res;
     std::map<int, TSFN> contained = m_events[key];
     int i = 0;
+    for (auto it = contained.begin(); it != contained.end(); ++it)
+    {
+        res.push_back(it->second);
+    }
+
+    return res;
+}
+
+std::vector<TSFN> EventPool::GetListeners(
+    AudioSessionDescriptor session, EventType type)
+{
+    uint32_t key = getHashCode(session, type);
+    std::vector<TSFN> res;
+    if (m_events.count(key) <= 0)
+        return res;
+    std::map<int, TSFN> contained = m_events[key];
     for (auto it = contained.begin(); it != contained.end(); ++it)
     {
         res.push_back(it->second);

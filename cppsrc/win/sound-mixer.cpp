@@ -44,10 +44,9 @@ void MixerObject::on_device_change_cb(
         }
     }
 }
-WinSoundMixer::SoundMixer *MixerObject::mixer;
 
 void MixerObject::on_audio_session_change_cb(
-    DeviceDescriptor desc, NotificationHandler data)
+    AudioSessionDescriptor desc, NotificationHandler data)
 {
     if (data.flags & CHANGE_MASK_MUTE)
     {
@@ -378,12 +377,12 @@ AudioSessionObject::~AudioSessionObject()
     delete reinterpret_cast<AudioSession *>(pSession);
 }
 
-DeviceDescriptor AudioSessionObject::Desc()
+AudioSessionDescriptor AudioSessionObject::Desc()
 {
     if (pSession == NULL)
-        return DeviceDescriptor {};
-    Device *d = reinterpret_cast<Device *>(pSession);
-    return d->Desc();
+        return AudioSessionDescriptor {};
+    AudioSession *session = reinterpret_cast<AudioSession *>(pSession);
+    return session->Desc();
 }
 
 Napi::Value AudioSessionObject::New(Napi::Env env, void *data)
@@ -474,6 +473,14 @@ Napi::Value AudioSessionObject::RegisterEvent(const Napi::CallbackInfo &info)
         eventType = EventType::MUTE;
     else
         return Napi::Number::New(env, -1);
+
+    AudioSession *session = reinterpret_cast<AudioSession *>(pSession);
+    if (session == NULL
+        || !session->RegisterEventCallback(
+            MixerObject::on_audio_session_change_cb))
+    {
+        return Napi::Number::New(env, -1);
+    }
 
     Napi::Function func = info[1].As<Napi::Function>();
     TSFN ref = TSFN::New(env, func, "test", 0, 1,

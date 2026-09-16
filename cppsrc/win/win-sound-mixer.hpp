@@ -13,6 +13,7 @@
 
 using SoundMixerUtils::DeviceDescriptor;
 using SoundMixerUtils::DeviceType;
+using SoundMixerUtils::AudioSessionDescriptor;
 using SoundMixerUtils::NotificationHandler;
 using SoundMixerUtils::VolumeBalance;
 
@@ -20,9 +21,15 @@ namespace WinSoundMixer
 {
 
 typedef void (*on_device_changed_cb_t)(
-    DeviceDescriptor dev, NotificationHandler);
+  DeviceDescriptor dev, NotificationHandler);
+typedef void (*on_audio_session_changed_cb_t)(
+  AudioSessionDescriptor session, NotificationHandler);
+
+class AudioSessionEvents;
 
 class AudioSession {
+    friend class AudioSessionEvents;
+
   public:
     AudioSession(IAudioSessionControl2 *control);
     ~AudioSession();
@@ -39,9 +46,16 @@ class AudioSession {
     std::string name();
     std::string path();
     AudioSessionState state();
+    AudioSessionDescriptor Desc();
+    bool RegisterEventCallback(on_audio_session_changed_cb_t cb);
 
   protected:
     IAudioSessionControl2 *control;
+    on_audio_session_changed_cb_t _sessionCallback;
+    AudioSessionEvents *sessionEvents;
+    bool eventsRegistered;
+    float _oldVolume;
+    BOOL _oldMute;
 
     ISimpleAudioVolume *getAudioVolume();
 };
@@ -96,7 +110,7 @@ class Device {
 
 class SoundMixer {
   public:
-    SoundMixer(on_device_changed_cb_t);
+    SoundMixer(on_device_changed_cb_t cb);
     ~SoundMixer();
     std::vector<Device *> GetDevices();
     Device *GetDefaultDevice(DeviceType);
@@ -136,5 +150,27 @@ class SoundMixerAudioEndpointVolumeCallback
 
   private:
     Device *device;
+};
+
+class AudioSessionEvents : public IAudioSessionEvents {
+  public:
+    AudioSessionEvents(AudioSession *session);
+
+    IFACEMETHODIMP_(ULONG) AddRef();
+    IFACEMETHODIMP_(ULONG) Release();
+
+  private:
+    IFACEMETHODIMP OnDisplayNameChanged(LPCWSTR, LPCGUID);
+    IFACEMETHODIMP OnIconPathChanged(LPCWSTR, LPCGUID);
+    IFACEMETHODIMP OnSimpleVolumeChanged(float, BOOL, LPCGUID);
+    IFACEMETHODIMP OnChannelVolumeChanged(
+        DWORD, float[], DWORD, LPCGUID);
+    IFACEMETHODIMP OnGroupingParamChanged(LPCGUID, LPCGUID);
+    IFACEMETHODIMP OnStateChanged(AudioSessionState);
+    IFACEMETHODIMP OnSessionDisconnected(AudioSessionDisconnectReason);
+    IFACEMETHODIMP QueryInterface(const IID &, void **);
+
+  private:
+    AudioSession *session;
 };
 }; // namespace WinSoundMixer

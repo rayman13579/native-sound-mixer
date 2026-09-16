@@ -36,6 +36,9 @@ class AudioSessionObject : public Napi::ObjectWrap<AudioSessionObject> {
   public:
     void *pSession;
     static Napi::FunctionReference *constructor;
+
+  private:
+    SoundMixerUtils::AudioSessionDescriptor Desc();
 };
 
 class DeviceObject : public Napi::ObjectWrap<DeviceObject> {
@@ -85,8 +88,8 @@ class MixerObject : public Napi::ObjectWrap<MixerObject> {
     static Napi::Value GetDefaultDevice(const Napi::CallbackInfo &info);
     static void on_device_change_cb(SoundMixerUtils::DeviceDescriptor d,
         SoundMixerUtils::NotificationHandler data);
-    static Napi::Value GetDefaultDevice(const Napi::CallbackInfo &info);
-    static void on_audio_session_change_cb(SoundMixerUtils::DeviceDescriptor d,
+    static void on_audio_session_change_cb(
+      SoundMixerUtils::AudioSessionDescriptor d,
         SoundMixerUtils::NotificationHandler data);
 
   public:

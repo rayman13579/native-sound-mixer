@@ -224,8 +224,8 @@ Device *SoundMixer::GetDefaultDevice(DeviceType type)
 }
 
 Device::Device(IMMDevice *dev, on_device_changed_cb_t cb)
-    : device(dev), endpoint(NULL), endpointVolume(NULL), _deviceCallback(cb),
-      device_cb(NULL)
+        : device(dev), endpoint(NULL), endpointVolume(NULL),
+            _deviceCallback(cb), device_cb(NULL)
 {
     LPWSTR winId;
     device->GetId(&winId);
@@ -454,13 +454,47 @@ VolumeBalance Device::GetVolumeBalance()
     return result;
 }
 
-AudioSession::AudioSession(IAudioSessionControl2 *control) : control(control)
+AudioSession::AudioSession(IAudioSessionControl2 *control)
+    : control(control), _sessionCallback(NULL), sessionEvents(NULL),
+      eventsRegistered(false), _oldVolume(0.F), _oldMute(FALSE)
 {
 }
 
 AudioSession::~AudioSession()
 {
+    if (control != NULL && sessionEvents != NULL && eventsRegistered)
+        control->UnregisterAudioSessionNotification(sessionEvents);
+    delete sessionEvents;
     SafeRelease(&control);
+}
+
+bool AudioSession::RegisterEventCallback(on_audio_session_changed_cb_t cb)
+{
+    _sessionCallback = cb;
+    if (eventsRegistered)
+        return true;
+
+    _oldVolume = GetVolume();
+    _oldMute = (BOOL)GetMute();
+    sessionEvents = new AudioSessionEvents(this);
+    HRESULT result = control->RegisterAudioSessionNotification(sessionEvents);
+    if (result != S_OK)
+    {
+        delete sessionEvents;
+        sessionEvents = NULL;
+        _sessionCallback = NULL;
+        return false;
+    }
+
+    eventsRegistered = true;
+    return true;
+}
+
+AudioSessionDescriptor AudioSession::Desc()
+{
+    AudioSessionDescriptor result = {};
+    result.id = id();
+    return result;
 }
 
 std::string AudioSession::name()
@@ -647,6 +681,96 @@ IFACEMETHODIMP_(ULONG) SoundMixerAudioEndpointVolumeCallback::AddRef()
 IFACEMETHODIMP_(ULONG) SoundMixerAudioEndpointVolumeCallback::Release()
 {
     return 0;
+}
+
+AudioSessionEvents::AudioSessionEvents(AudioSession *session)
+    : session(session)
+{
+}
+
+IFACEMETHODIMP AudioSessionEvents::OnDisplayNameChanged(
+    LPCWSTR, LPCGUID)
+{
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionEvents::OnIconPathChanged(LPCWSTR, LPCGUID)
+{
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionEvents::OnSimpleVolumeChanged(
+    float newVolume, BOOL newMute, LPCGUID)
+{
+    if (session == NULL || session->_sessionCallback == NULL)
+        return S_OK;
+
+    int flags = 0;
+    if (newMute != session->_oldMute)
+    {
+        flags |= CHANGE_MASK_MUTE;
+        session->_oldMute = newMute;
+    }
+    if (newVolume != session->_oldVolume)
+    {
+        flags |= CHANGE_MASK_VOLUME;
+        session->_oldVolume = newVolume;
+    }
+
+    if (flags != 0)
+    {
+        NotificationHandler handler
+            = {flags, newVolume, (bool)newMute};
+        session->_sessionCallback(session->Desc(), handler);
+    }
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionEvents::OnChannelVolumeChanged(
+    DWORD, float[], DWORD, LPCGUID)
+{
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionEvents::OnGroupingParamChanged(
+    LPCGUID, LPCGUID)
+{
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionEvents::OnStateChanged(AudioSessionState)
+{
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionEvents::OnSessionDisconnected(
+    AudioSessionDisconnectReason)
+{
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionEvents::QueryInterface(
+    const IID &iid, void **ppUnk)
+{
+    if (ppUnk == NULL)
+        return E_POINTER;
+    if (iid == __uuidof(IUnknown) || iid == __uuidof(IAudioSessionEvents))
+    {
+        *ppUnk = static_cast<IAudioSessionEvents *>(this);
+        return S_OK;
+    }
+    *ppUnk = NULL;
+    return E_NOINTERFACE;
+}
+
+IFACEMETHODIMP_(ULONG) AudioSessionEvents::AddRef()
+{
+    return 1;
+}
+
+IFACEMETHODIMP_(ULONG) AudioSessionEvents::Release()
+{
+    return 1;
 }
 
 } // namespace WinSoundMixer
