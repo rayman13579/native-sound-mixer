@@ -213,6 +213,36 @@ export declare class AudioSession {
      * @readonly
      */
 	public readonly state: AudioSessionState
+
+    /**
+     *  @param {string} ev - The type of event to subscribe to. 
+     *  It can be either `volume`, or `mute`.
+     *
+     *  @param {function} callback - The callback to run when the event is
+     *  triggered.
+     *
+     *  @returns {number} - The id of the registered callback used to 
+     *  remove the listener.
+     *
+     *  @remarks Triggering a volume change, or mute change in a callback can
+     *  cause the listeners to self trigger, leading to an infinite trigger
+     *  loop.
+     *
+     *  @see {@link AudioSession.removeListener | removing a listener}
+     */
+    public on(ev: string, callback: (payload) => void): number
+
+    /**
+     *  @param {string} ev - The type of event to remove the listener of. 
+     *
+     *  @param {number} handler - The identifier of the registered callback
+     *  to be removed.
+     *
+     *  @returns {boolean} - Whether the callback was unregistered or not.
+     *
+     *  @see {@link AudioSession.on | registering a listener}
+     */
+    public removeListener(ev: string, handler: number): boolean
 }
 
 /**

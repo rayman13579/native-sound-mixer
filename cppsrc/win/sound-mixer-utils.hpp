@@ -9,9 +9,9 @@
     ((balance.right < 1.F && balance.right > 0.F) \
         && (balance.left < 1.F && balance.left > 0.F))
 
-#define DEVICE_CHANGE_MASK_MUTE 1
-#define DEVICE_CHANGE_MASK_VOLUME 2 * DEVICE_CHANGE_MASK_MUTE
-#define DEVICE_CHANGE_MASK_CHANNEL_COUNT 2 * DEVICE_CHANGE_MASK_VOLUME
+#define CHANGE_MASK_MUTE 1
+#define CHANGE_MASK_VOLUME 2 * CHANGE_MASK_MUTE
+#define CHANGE_MASK_CHANNEL_COUNT 2 * CHANGE_MASK_VOLUME
 
 namespace SoundMixerUtils
 {

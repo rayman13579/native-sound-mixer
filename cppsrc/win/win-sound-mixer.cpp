@@ -615,12 +615,12 @@ IFACEMETHODIMP SoundMixerAudioEndpointVolumeCallback::OnNotify(
     int flags = 0;
     if (pNotify->bMuted != device->_oldMute)
     {
-        flags |= DEVICE_CHANGE_MASK_MUTE;
+        flags |= CHANGE_MASK_MUTE;
         device->_oldMute = pNotify->bMuted;
     }
     if (pNotify->fMasterVolume != device->_oldVolume)
     {
-        flags |= DEVICE_CHANGE_MASK_VOLUME;
+        flags |= CHANGE_MASK_VOLUME;
         device->_oldVolume = pNotify->fMasterVolume;
     }
     NotificationHandler handler = NotificationHandler {

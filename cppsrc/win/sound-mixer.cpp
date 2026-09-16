@@ -16,31 +16,62 @@ WinSoundMixer::SoundMixer *MixerObject::mixer;
 void MixerObject::on_device_change_cb(
     DeviceDescriptor desc, NotificationHandler data)
 {
-    if (data.flags & DEVICE_CHANGE_MASK_MUTE)
+    if (data.flags & CHANGE_MASK_MUTE)
     {
-        vector<TSFN> listeners
-            = eventPool->GetListeners(desc, EventType::MUTE);
+        vector<TSFN> listeners = eventPool->GetListeners(desc, EventType::MUTE);
         for (TSFN cb : listeners)
         {
             NotificationHandler *pData = new NotificationHandler();
             *pData = data;
-            pData->flags = DEVICE_CHANGE_MASK_MUTE;
+            pData->flags = CHANGE_MASK_MUTE;
             cb.Acquire();
             cb.NonBlockingCall(pData);
             cb.Release();
         }
     }
 
-    if (data.flags & DEVICE_CHANGE_MASK_VOLUME)
+    if (data.flags & CHANGE_MASK_VOLUME)
     {
-        vector<TSFN> listeners
-            = eventPool->GetListeners(desc, EventType::VOLUME);
+        vector<TSFN> listeners = eventPool->GetListeners(desc, EventType::VOLUME);
         for (TSFN cb : listeners)
         {
             NotificationHandler *pData = new NotificationHandler();
             *pData = data;
             cb.Acquire();
-            pData->flags = DEVICE_CHANGE_MASK_VOLUME;
+            pData->flags = CHANGE_MASK_VOLUME;
+            cb.BlockingCall(pData);
+            cb.Release();
+        }
+    }
+}
+WinSoundMixer::SoundMixer *MixerObject::mixer;
+
+void MixerObject::on_audio_session_change_cb(
+    DeviceDescriptor desc, NotificationHandler data)
+{
+    if (data.flags & CHANGE_MASK_MUTE)
+    {
+        vector<TSFN> listeners = eventPool->GetListeners(desc, EventType::MUTE);
+        for (TSFN cb : listeners)
+        {
+            NotificationHandler *pData = new NotificationHandler();
+            *pData = data;
+            pData->flags = CHANGE_MASK_MUTE;
+            cb.Acquire();
+            cb.NonBlockingCall(pData);
+            cb.Release();
+        }
+    }
+
+    if (data.flags & CHANGE_MASK_VOLUME)
+    {
+        vector<TSFN> listeners = eventPool->GetListeners(desc, EventType::VOLUME);
+        for (TSFN cb : listeners)
+        {
+            NotificationHandler *pData = new NotificationHandler();
+            *pData = data;
+            cb.Acquire();
+            pData->flags = CHANGE_MASK_VOLUME;
             cb.BlockingCall(pData);
             cb.Release();
         }
@@ -329,7 +360,10 @@ Napi::Function AudioSessionObject::GetClass(Napi::Env env)
                 &AudioSessionObject::SetVolume>("volume"),
             InstanceAccessor<&AudioSessionObject::GetChannelVolume,
                 &AudioSessionObject::SetChannelVolume>("balance"),
-            InstanceAccessor<&AudioSessionObject::GetState>("state")});
+            InstanceAccessor<&AudioSessionObject::GetState>("state"),
+            InstanceMethod<&AudioSessionObject::RegisterEvent>("on"),
+            InstanceMethod<&AudioSessionObject::RemoveEvent>("removeListener")
+        });;
 }
 
 Napi::Object AudioSessionObject::Init(Napi::Env env, Napi::Object exports)
@@ -342,6 +376,14 @@ Napi::Object AudioSessionObject::Init(Napi::Env env, Napi::Object exports)
 AudioSessionObject::~AudioSessionObject()
 {
     delete reinterpret_cast<AudioSession *>(pSession);
+}
+
+DeviceDescriptor AudioSessionObject::Desc()
+{
+    if (pSession == NULL)
+        return DeviceDescriptor {};
+    Device *d = reinterpret_cast<Device *>(pSession);
+    return d->Desc();
 }
 
 Napi::Value AudioSessionObject::New(Napi::Env env, void *data)
@@ -412,6 +454,58 @@ void AudioSessionObject::SetChannelVolume(
             param.Get("left").As<Napi::Number>().FloatValue(), true};
 
     session->SetVolumeBalance(balance);
+}
+
+Napi::Value AudioSessionObject::RegisterEvent(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() != 2 || !info[0].IsString() || !info[1].IsFunction())
+    {
+        Napi::Error::New(env, "Expected <event-type> <function>")
+            .ThrowAsJavaScriptException();
+        return Napi::Number::New(env, -1);
+    }
+
+    std::string eventName = info[0].As<Napi::String>().Utf8Value();
+    EventType eventType;
+    if (eventName == "volume")
+        eventType = EventType::VOLUME;
+    else if (eventName == "mute")
+        eventType = EventType::MUTE;
+    else
+        return Napi::Number::New(env, -1);
+
+    Napi::Function func = info[1].As<Napi::Function>();
+    TSFN ref = TSFN::New(env, func, "test", 0, 1,
+        new Napi::Reference<Napi::Value>(Napi::Persistent(info.This())));
+
+    int handler
+        = MixerObject::eventPool->RegisterEvent(Desc(), eventType, ref);
+    return Napi::Number::New(env, handler);
+}
+
+Napi::Value AudioSessionObject::RemoveEvent(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    // expects EventType and event id
+    if (info.Length() != 2 || !info[0].IsString() || !info[1].IsNumber())
+    {
+        Napi::Error::New(env, "Expected <event-type> <callback-handler>")
+            .ThrowAsJavaScriptException();
+        return Napi::Boolean::New(env, false);
+    }
+    std::string eventName = info[0].As<Napi::String>().Utf8Value();
+    EventType eventType;
+    if (eventName == "volume")
+        eventType = EventType::VOLUME;
+    else if (eventName == "mute")
+        eventType = EventType::MUTE;
+    else
+        return Napi::Number::New(env, -1);
+    int handler = info[1].As<Napi::Number>().Int32Value();
+    bool res = MixerObject::eventPool->RemoveEvent(Desc(), eventType, handler);
+
+    return Napi::Boolean::New(env, res);
 }
 
 } // namespace SoundMixer

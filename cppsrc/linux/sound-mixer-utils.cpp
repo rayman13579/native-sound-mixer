@@ -145,7 +145,7 @@ void CallJs(Napi::Env env, Napi::Function cb,
     if (data != nullptr)
     {
         Napi::Value value;
-        if (data->flags & DEVICE_CHANGE_MASK_MUTE)
+        if (data->flags & CHANGE_MASK_MUTE)
         {
             value = Napi::Boolean::New(env, data->mute);
         }
