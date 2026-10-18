@@ -43,6 +43,21 @@ void MixerObject::on_device_change_cb(
             cb.Release();
         }
     }
+
+    if (data.flags & CHANGE_MASK_SESSIONS)
+    {
+        vector<TSFN> listeners
+            = eventPool->GetListeners(desc, EventType::SESSIONS);
+        for (TSFN cb : listeners)
+        {
+            NotificationHandler *pData = new NotificationHandler();
+            *pData = data;
+            pData->flags = CHANGE_MASK_SESSIONS;
+            cb.Acquire();
+            cb.NonBlockingCall(pData);
+            cb.Release();
+        }
+    }
 }
 
 void MixerObject::on_audio_session_change_cb(
@@ -269,6 +284,8 @@ Napi::Value DeviceObject::RegisterEvent(const Napi::CallbackInfo &info)
         eventType = EventType::VOLUME;
     else if (eventName == "mute")
         eventType = EventType::MUTE;
+    else if (eventName == "sessions")
+        eventType = EventType::SESSIONS;
     else
         return Napi::Number::New(env, -1);
 
@@ -278,6 +295,8 @@ Napi::Value DeviceObject::RegisterEvent(const Napi::CallbackInfo &info)
 
     int handler
         = MixerObject::eventPool->RegisterEvent(Desc(), eventType, ref);
+    if (eventType == EventType::SESSIONS)
+        reinterpret_cast<Device *>(pDevice)->WatchAudioSessions();
     return Napi::Number::New(env, handler);
 }
 
@@ -297,6 +316,8 @@ Napi::Value DeviceObject::RemoveEvent(const Napi::CallbackInfo &info)
         eventType = EventType::VOLUME;
     else if (eventName == "mute")
         eventType = EventType::MUTE;
+    else if (eventName == "sessions")
+        eventType = EventType::SESSIONS;
     else
         return Napi::Number::New(env, -1);
     int handler = info[1].As<Napi::Number>().Int32Value();

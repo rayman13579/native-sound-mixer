@@ -205,6 +205,10 @@ void CallJs(Napi::Env env, Napi::Function cb,
         {
             value = Napi::Number::New(env, data->volume);
         }
+        else if (data->flags & CHANGE_MASK_SESSIONS)
+        {
+            value = owner->Value().As<Napi::Object>().Get("sessions");
+        }
         else
         {
             valid = false;

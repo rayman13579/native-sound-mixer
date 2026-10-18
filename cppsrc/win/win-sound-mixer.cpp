@@ -236,6 +236,7 @@ Device::Device(IMMDevice *dev, on_device_changed_cb_t cb)
 
     _oldVolume = GetVolume();
     _oldMute = (BOOL)GetMute();
+    RegisterSessionNotifications();
 
     CoTaskMemFree(winId);
 }
@@ -323,6 +324,12 @@ bool Device::Update()
 
 Device::~Device()
 {
+    if (sessionManager != NULL && sessionNotification != NULL)
+        sessionManager->UnregisterSessionNotification(sessionNotification);
+    delete sessionNotification;
+    SafeRelease(&sessionManager);
+    for (auto it = observedSessions.begin(); it != observedSessions.end(); ++it)
+        delete it->second;
     if (endpointVolume != NULL)
         endpointVolume->UnregisterControlChangeNotify(device_cb);
     delete device_cb;
@@ -331,29 +338,106 @@ Device::~Device()
     SafeRelease(&device);
 }
 
+void Device::RegisterSessionNotifications()
+{
+    if (sessionManager != NULL || device == NULL)
+        return;
+
+    HRESULT result = device->Activate(__uuidof(IAudioSessionManager2),
+        CLSCTX_ALL, NULL, (LPVOID *)&sessionManager);
+    if (result != S_OK || sessionManager == NULL)
+        return;
+
+    sessionNotification = new AudioSessionNotification(this);
+    result = sessionManager->RegisterSessionNotification(sessionNotification);
+    if (result != S_OK)
+    {
+        delete sessionNotification;
+        sessionNotification = NULL;
+        SafeRelease(&sessionManager);
+    }
+}
+
+void Device::ObserveSession(IAudioSessionControl2 *control)
+{
+    AudioSession *session = new AudioSession(control, this);
+    std::string sessionId = session->id();
+    std::lock_guard<std::mutex> lock(observedSessionsMutex);
+    if (observedSessions.count(sessionId) > 0)
+    {
+        delete session;
+        return;
+    }
+    observedSessions[sessionId] = session;
+    session->RegisterEventCallback(NULL);
+}
+
+void Device::WatchAudioSessions()
+{
+    if (sessionManager == NULL)
+        return;
+
+    IAudioSessionEnumerator *enumerator = NULL;
+    if (sessionManager->GetSessionEnumerator(&enumerator) != S_OK
+        || enumerator == NULL)
+        return;
+
+    int count = 0;
+    enumerator->GetCount(&count);
+    for (int i = 0; i < count; ++i)
+    {
+        IAudioSessionControl *control = NULL;
+        IAudioSessionControl2 *control2 = NULL;
+        if (enumerator->GetSession(i, &control) == S_OK
+            && control != NULL
+            && control->QueryInterface(&control2) == S_OK)
+            ObserveSession(control2);
+        SafeRelease(&control);
+    }
+    SafeRelease(&enumerator);
+}
+
+void Device::NotifySessionsChanged()
+{
+    if (_deviceCallback == NULL)
+        return;
+    NotificationHandler handler = {CHANGE_MASK_SESSIONS, 0.F, false};
+    _deviceCallback(Desc(), handler);
+}
+
 vector<AudioSession *> Device::GetAudioSessions()
 {
+    IAudioSessionManager2 *manager = NULL;
+    if (device == NULL
+        || device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL,
+               NULL, (LPVOID *)&manager)
+            != S_OK
+        || manager == NULL)
+        return {};
 
-    IAudioSessionManager2 *manager;
-    device->Activate(
-        __uuidof(IAudioSessionManager2), CLSCTX_ALL, NULL, (LPVOID *)&manager);
-
-    IAudioSessionEnumerator *pEnumerator;
-    manager->GetSessionEnumerator(&pEnumerator);
+    IAudioSessionEnumerator *pEnumerator = NULL;
+    HRESULT result = manager->GetSessionEnumerator(&pEnumerator);
     SafeRelease(&manager);
+    if (result != S_OK || pEnumerator == NULL)
+        return {};
 
     std::vector<AudioSession *> sessions;
 
-    int count;
-    pEnumerator->GetCount(&count);
-    IAudioSessionControl *control;
-    IAudioSessionControl2 *control2;
+    int count = 0;
+    if (pEnumerator->GetCount(&count) != S_OK)
+    {
+        SafeRelease(&pEnumerator);
+        return sessions;
+    }
     for (int i = 0; i < count; i++)
     {
+        IAudioSessionControl *control = NULL;
+        IAudioSessionControl2 *control2 = NULL;
         if (pEnumerator->GetSession(i, &control) == S_OK
+            && control != NULL
             && control->QueryInterface(&control2) == S_OK)
         {
-            sessions.push_back(new AudioSession(control2));
+            sessions.push_back(new AudioSession(control2, this));
         }
         SafeRelease(&control);
     }
@@ -454,10 +538,16 @@ VolumeBalance Device::GetVolumeBalance()
     return result;
 }
 
-AudioSession::AudioSession(IAudioSessionControl2 *control)
+AudioSession::AudioSession(IAudioSessionControl2 *control, Device *parent)
     : control(control), _sessionCallback(NULL), sessionEvents(NULL),
-      eventsRegistered(false), _oldVolume(0.F), _oldMute(FALSE)
+      parent(parent), eventsRegistered(false), _oldVolume(0.F), _oldMute(FALSE)
 {
+}
+
+void AudioSession::NotifyDeviceSessionsChanged()
+{
+    if (parent != NULL)
+        parent->NotifySessionsChanged();
 }
 
 AudioSession::~AudioSession()
@@ -738,14 +828,17 @@ IFACEMETHODIMP AudioSessionEvents::OnGroupingParamChanged(
     return S_OK;
 }
 
-IFACEMETHODIMP AudioSessionEvents::OnStateChanged(AudioSessionState)
+IFACEMETHODIMP AudioSessionEvents::OnStateChanged(AudioSessionState state)
 {
+    if (state == AudioSessionStateExpired)
+        session->NotifyDeviceSessionsChanged();
     return S_OK;
 }
 
 IFACEMETHODIMP AudioSessionEvents::OnSessionDisconnected(
     AudioSessionDisconnectReason)
 {
+    session->NotifyDeviceSessionsChanged();
     return S_OK;
 }
 
@@ -769,6 +862,48 @@ IFACEMETHODIMP_(ULONG) AudioSessionEvents::AddRef()
 }
 
 IFACEMETHODIMP_(ULONG) AudioSessionEvents::Release()
+{
+    return 1;
+}
+
+AudioSessionNotification::AudioSessionNotification(Device *device)
+    : device(device)
+{
+}
+
+IFACEMETHODIMP AudioSessionNotification::OnSessionCreated(
+    IAudioSessionControl *control)
+{
+    IAudioSessionControl2 *control2 = NULL;
+    if (control != NULL && control->QueryInterface(&control2) == S_OK)
+    {
+        device->ObserveSession(control2);
+        device->NotifySessionsChanged();
+    }
+    return S_OK;
+}
+
+IFACEMETHODIMP AudioSessionNotification::QueryInterface(
+    const IID &iid, void **ppUnk)
+{
+    if (ppUnk == NULL)
+        return E_POINTER;
+    if (iid == __uuidof(IUnknown)
+        || iid == __uuidof(IAudioSessionNotification))
+    {
+        *ppUnk = static_cast<IAudioSessionNotification *>(this);
+        return S_OK;
+    }
+    *ppUnk = NULL;
+    return E_NOINTERFACE;
+}
+
+IFACEMETHODIMP_(ULONG) AudioSessionNotification::AddRef()
+{
+    return 1;
+}
+
+IFACEMETHODIMP_(ULONG) AudioSessionNotification::Release()
 {
     return 1;
 }

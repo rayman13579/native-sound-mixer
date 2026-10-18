@@ -4,6 +4,8 @@
 #include <audiopolicy.h>
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
+#include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 #include "sound-mixer-utils.hpp"
@@ -26,12 +28,14 @@ typedef void (*on_audio_session_changed_cb_t)(
   AudioSessionDescriptor session, NotificationHandler);
 
 class AudioSessionEvents;
+class AudioSessionNotification;
+class Device;
 
 class AudioSession {
     friend class AudioSessionEvents;
 
   public:
-    AudioSession(IAudioSessionControl2 *control);
+    AudioSession(IAudioSessionControl2 *control, Device *parent = nullptr);
     ~AudioSession();
 
     virtual bool GetMute();
@@ -48,11 +52,13 @@ class AudioSession {
     AudioSessionState state();
     AudioSessionDescriptor Desc();
     bool RegisterEventCallback(on_audio_session_changed_cb_t cb);
+    void NotifyDeviceSessionsChanged();
 
   protected:
     IAudioSessionControl2 *control;
     on_audio_session_changed_cb_t _sessionCallback;
     AudioSessionEvents *sessionEvents;
+    Device *parent;
     bool eventsRegistered;
     float _oldVolume;
     BOOL _oldMute;
@@ -61,6 +67,8 @@ class AudioSession {
 };
 
 class Device {
+    friend class AudioSessionNotification;
+
   public:
     Device(IMMDevice *, on_device_changed_cb_t cb);
     ~Device();
@@ -90,6 +98,8 @@ class Device {
 
     std::vector<AudioSession *> GetAudioSessions();
     AudioSession *GetAudioSessionById(std::string);
+    void WatchAudioSessions();
+    void NotifySessionsChanged();
 
     static IMMDeviceEnumerator *GetEnumerator();
     on_device_changed_cb_t _deviceCallback;
@@ -106,6 +116,13 @@ class Device {
 
   private:
     bool valid = true;
+    IAudioSessionManager2 *sessionManager = nullptr;
+    AudioSessionNotification *sessionNotification = nullptr;
+    std::map<std::string, AudioSession *> observedSessions;
+    std::mutex observedSessionsMutex;
+
+    void RegisterSessionNotifications();
+    void ObserveSession(IAudioSessionControl2 *);
 };
 
 class SoundMixer {
@@ -172,5 +189,17 @@ class AudioSessionEvents : public IAudioSessionEvents {
 
   private:
     AudioSession *session;
+};
+
+class AudioSessionNotification : public IAudioSessionNotification {
+  public:
+    AudioSessionNotification(Device *device);
+    IFACEMETHODIMP_(ULONG) AddRef();
+    IFACEMETHODIMP_(ULONG) Release();
+
+  private:
+    IFACEMETHODIMP OnSessionCreated(IAudioSessionControl *);
+    IFACEMETHODIMP QueryInterface(const IID &, void **);
+    Device *device;
 };
 }; // namespace WinSoundMixer

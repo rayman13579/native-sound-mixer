@@ -96,8 +96,8 @@ export declare class Device {
 	public readonly sessions: AudioSession[]
 
     /**
-     *  @param {string} ev - The type of event to subscribe to. 
-     *  It can be either `volume`, or `mute`.
+        *  @param {string} ev - The event type: `volume`, `mute`, or `sessions`.
+        *  The `sessions` callback receives the refreshed list of audio sessions.
      *
      *  @param {function} callback - The callback to run when the event is
      *  triggered.
@@ -215,8 +215,7 @@ export declare class AudioSession {
 	public readonly state: AudioSessionState
 
     /**
-     *  @param {string} ev - The type of event to subscribe to. 
-     *  It can be either `volume`, or `mute`.
+        *  @param {string} ev - The type of event to subscribe to: `volume` or `mute`.
      *
      *  @param {function} callback - The callback to run when the event is
      *  triggered.

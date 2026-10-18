@@ -12,6 +12,7 @@
 #define CHANGE_MASK_MUTE 1
 #define CHANGE_MASK_VOLUME 2 * CHANGE_MASK_MUTE
 #define CHANGE_MASK_CHANNEL_COUNT 2 * CHANGE_MASK_VOLUME
+#define CHANGE_MASK_SESSIONS 2 * CHANGE_MASK_CHANNEL_COUNT
 
 namespace SoundMixerUtils
 {
@@ -39,7 +40,8 @@ enum EventType
 {
     VOLUME = 0,
     MUTE = 1,
-    COUNT = 2
+    SESSIONS = 2,
+    COUNT = 3
 };
 
 typedef struct
